@@ -3,8 +3,7 @@
 // Déployer directement sur Render.com
 // ================================================================
 require('dotenv').config();
-const app = express();
-      app.set('trust proxy', 1);
+const express   = require('express');
 const cors      = require('cors');
 const helmet    = require('helmet');
 const morgan    = require('morgan');
@@ -44,6 +43,7 @@ const clientOnly  = (r,s,n) => r.user?.type==='client'  ? n() : s.status(403).js
 
 // ── App Express ──────────────────────────────────────────────────
 const app = express();
+app.set('trust proxy', 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy:'cross-origin' } }));
 app.use(morgan('combined'));
 app.use(express.json({ limit:'10mb' }));
@@ -170,8 +170,10 @@ artisansRouter.get('/', async (req,res) => {
   if(city){where+=' AND u.city=?';params.push(city);}
   const orderMap={rating:'ap.rating DESC',reviews:'ap.reviews_count DESC',newest:'u.created_at DESC'};
   const order=orderMap[sort]||'ap.rating DESC';
-  const [rows] = await pool.query(`SELECT u.id,u.name,u.city,u.avatar_url,ap.id as artisan_id,ap.category,u.bio,ap.rating,ap.reviews_count,ap.jobs_count,ap.badge_recommended,ap.plan,ap.whatsapp,u.phone,GROUP_CONCAT(DISTINCT ast.tag ORDER BY ast.tag SEPARATOR ',') as tags,GROUP_CONCAT(DISTINCT asv.label ORDER BY asv.sort_order SEPARATOR ',') as services FROM users u JOIN artisan_profiles ap ON ap.user_id=u.id LEFT JOIN artisan_tags ast ON ast.artisan_id=ap.id LEFT JOIN artisan_services asv ON asv.artisan_id=ap.id ${where} GROUP BY u.id,ap.id ORDER BY ${order} LIMIT ? OFFSET ?`,[...params,parseInt(limit),offset]);
-  res.json(rows.map(a=>({...a,tags:a.tags?a.tags.split(','):[],services:a.services?a.services.split(','):[]})));
+  try {
+    const [rows] = await pool.query(`SELECT u.id,u.name,u.city,u.avatar_url,ap.id as artisan_id,ap.category,u.bio,ap.rating,ap.reviews_count,ap.jobs_count,ap.badge_recommended,ap.plan,ap.whatsapp,u.phone,GROUP_CONCAT(DISTINCT ast.tag ORDER BY ast.tag SEPARATOR ',') as tags,GROUP_CONCAT(DISTINCT asv.label ORDER BY asv.sort_order SEPARATOR ',') as services FROM users u JOIN artisan_profiles ap ON ap.user_id=u.id LEFT JOIN artisan_tags ast ON ast.artisan_id=ap.id LEFT JOIN artisan_services asv ON asv.artisan_id=ap.id ${where} GROUP BY u.id,ap.id ORDER BY ${order} LIMIT ? OFFSET ?`,[...params,parseInt(limit),offset]);
+    res.json(rows.map(a=>({...a,tags:a.tags?a.tags.split(','):[],services:a.services?a.services.split(','):[]})));
+  } catch(e) { console.error('artisans list error:',e.message); res.status(500).json({error:'Erreur serveur.'}); }
 });
 
 artisansRouter.get('/:id', async (req,res) => {
@@ -534,4 +536,15 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`🚀 Fixily.tn API — port ${PORT}`);
   console.log(`   DB: ${process.env.DB_NAME}@${process.env.DB_HOST}`);
+});
+
+// Handler global — évite le crash sur erreur non catchée
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err.message);
+  // Ne pas crasher le processus
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ Unhandled Rejection:', reason?.message || reason);
+  // Ne pas crasher le processus
 });
