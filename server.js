@@ -49,7 +49,7 @@ app.use(morgan('combined'));
 app.use(express.json({ limit:'10mb' }));
 app.use(express.urlencoded({ extended:true }));
 app.use(cors({
-  origin: [process.env.FRONTEND_URL || 'https://fixily.tn', 'http://localhost:3000'],
+  origin: true,
   credentials: true,
 }));
 app.use('/api/', rateLimit({ windowMs:15*60*1000, max:300, message:{error:'Trop de requêtes.'} }));
