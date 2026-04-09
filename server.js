@@ -666,8 +666,17 @@ app.post('/api/admin/seed-test-data', authMw, adminOnly, async (req,res) => {
       );
     }
 
+    // Compte test client facile à retenir
+    const [exTest] = await conn.query("SELECT id FROM users WHERE email='test@fixily.tn'");
+    if(!exTest.length){
+      await conn.query(
+        "INSERT INTO users (type,name,email,phone,password_hash,city,region) VALUES ('client','Compte Test','test@fixily.tn','+21698000000',?,?,?)",
+        [hash,'Tunis','Menzah']
+      );
+    }
+
     await conn.commit();
-    res.json({message:'✅ 10 artisans + 20 clients de test créés. Mot de passe: fixily123'});
+    res.json({message:'✅ 10 artisans + 20 clients de test créés. Mot de passe: fixily123 | Compte test: test@fixily.tn / fixily123'});
   } catch(e){
     await conn.rollback();
     console.error(e);
