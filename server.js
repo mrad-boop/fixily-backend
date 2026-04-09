@@ -548,3 +548,146 @@ process.on('unhandledRejection', (reason) => {
   console.error('❌ Unhandled Rejection:', reason?.message || reason);
   // Ne pas crasher le processus
 });
+
+// ================================================================
+// NOUVELLES ROUTES V3
+// ================================================================
+
+// ── Stats réelles pour la homepage ──────────────────────────────
+app.get('/api/stats', async (req,res) => {
+  try {
+    const [[artisans]] = await pool.query("SELECT COUNT(*) n FROM artisan_profiles WHERE is_validated=1");
+    const [[clients]]  = await pool.query("SELECT COUNT(*) n FROM users WHERE type='client' AND is_active=1");
+    const [[rating]]   = await pool.query("SELECT ROUND(AVG(rating),1) n FROM artisan_profiles WHERE reviews_count>0 AND is_validated=1");
+    res.json({
+      artisans: artisans.n || 0,
+      clients:  clients.n  || 0,
+      rating:   rating.n   || 0,
+    });
+  } catch(e) { res.json({artisans:0,clients:0,rating:0}); }
+});
+
+// ── Notification Premium (Me notifier) ──────────────────────────
+app.post('/api/notify-premium', async (req,res) => {
+  const {email, whatsapp} = req.body;
+  if(!email && !whatsapp) return res.status(400).json({error:'Email ou WhatsApp requis.'});
+  try {
+    await pool.query(
+      'INSERT INTO contact_messages (name, email, phone, message) VALUES (?,?,?,?)',
+      ['Notification Premium', email||null, whatsapp||null, 'Demande de notification pour le lancement Premium']
+    );
+    res.json({message:'Vous serez notifié au lancement Premium !'});
+  } catch(e) { res.status(500).json({error:'Erreur serveur.'}); }
+});
+
+// ── Admin ajoute un artisan ──────────────────────────────────────
+app.post('/api/admin/artisans/create', authMw, adminOnly, async (req,res) => {
+  const {name,email,phone,password,city,region,address,bio,category,whatsapp} = req.body;
+  if(!name||!email||!phone||!city||!category) return res.status(400).json({error:'Champs requis manquants.'});
+  const conn = await pool.getConnection();
+  try {
+    const [ex] = await conn.query('SELECT id FROM users WHERE email=?',[email.toLowerCase()]);
+    if(ex.length) return res.status(409).json({error:'Email déjà utilisé.'});
+    const hash = await require('bcryptjs').hash(password||'fixily123',12);
+    await conn.beginTransaction();
+    const [r] = await conn.query(
+      'INSERT INTO users (type,name,email,phone,password_hash,city,region,address,bio) VALUES (?,?,?,?,?,?,?,?,?)',
+      ['artisan',name,email.toLowerCase(),phone,hash,city,region||null,address||null,bio||null]
+    );
+    await conn.query(
+      'INSERT INTO artisan_profiles (user_id,category,whatsapp,is_validated) VALUES (?,?,?,1)',
+      [r.insertId,category,whatsapp||phone]
+    );
+    await conn.commit();
+    res.status(201).json({message:'Artisan créé et validé.',id:r.insertId});
+  } catch(e){await conn.rollback();res.status(500).json({error:'Erreur serveur.'});}
+  finally{conn.release();}
+});
+
+// ── Admin upload logo (URL) ──────────────────────────────────────
+app.put('/api/admin/logo', authMw, adminOnly, async (req,res) => {
+  const {logo_url} = req.body;
+  if(!logo_url) return res.status(400).json({error:'URL du logo requis.'});
+  await pool.query(
+    'INSERT INTO site_config (config_key,config_value,updated_by) VALUES (?,?,?) ON DUPLICATE KEY UPDATE config_value=VALUES(config_value),updated_by=VALUES(updated_by)',
+    ['logo_url', logo_url, req.user.id]
+  );
+  res.json({message:'Logo mis à jour.'});
+});
+
+// ── Données de test (route admin uniquement) ─────────────────────
+app.post('/api/admin/seed-test-data', authMw, adminOnly, async (req,res) => {
+  const bcrypt = require('bcryptjs');
+  const hash = await bcrypt.hash('fixily123', 10);
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // 10 Artisans test
+    const artisans = [
+      {name:'Mohamed Trabelsi',email:'m.trabelsi@test.tn',phone:'+21622111001',city:'Tunis',category:'Plomberie',bio:'Plombier expérimenté avec 10 ans d\'expérience.',whatsapp:'+21622111001',rating:4.8,jobs:45,reviews:18},
+      {name:'Sami Khelifi',email:'s.khelifi@test.tn',phone:'+21655222002',city:'Sfax',category:'Électricité',bio:'Électricien certifié, spécialiste installations solaires.',whatsapp:'+21655222002',rating:4.6,jobs:32,reviews:12},
+      {name:'Amine Bouzid',email:'a.bouzid@test.tn',phone:'+21698333003',city:'Sousse',category:'Climatisation',bio:'Technicien climatisation toutes marques.',whatsapp:'+21698333003',rating:4.9,jobs:67,reviews:28},
+      {name:'Fatma Mansour',email:'f.mansour@test.tn',phone:'+21620444004',city:'Tunis',category:'Ménage',bio:'Service de ménage professionnel, discret et fiable.',whatsapp:'+21620444004',rating:5.0,jobs:120,reviews:45},
+      {name:'Yassine Gharbi',email:'y.gharbi@test.tn',phone:'+21625555005',city:'Nabeul',category:'Peinture',bio:'Peintre en bâtiment, intérieur et extérieur.',whatsapp:'+21625555005',rating:4.5,jobs:28,reviews:9},
+      {name:'Karim Dridi',email:'k.dridi@test.tn',phone:'+21699666006',city:'Bizerte',category:'Maçonnerie',bio:'Maçon qualifié, rénovation et construction.',whatsapp:'+21699666006',rating:4.7,jobs:55,reviews:22},
+      {name:'Slim Hamdi',email:'s.hamdi@test.tn',phone:'+21654777007',city:'Monastir',category:'Menuiserie',bio:'Menuisier artisan, meubles sur mesure.',whatsapp:'+21654777007',rating:4.4,jobs:19,reviews:7},
+      {name:'Rami Zghal',email:'r.zghal@test.tn',phone:'+21621888008',city:'Tunis',category:'Serrurerie',bio:'Serrurier disponible 24h/7j, urgences acceptées.',whatsapp:'+21621888008',rating:4.8,jobs:89,reviews:35},
+      {name:'Nizar Bouaziz',email:'n.bouaziz@test.tn',phone:'+21658999009',city:'Ariana',category:'Informatique',bio:'Technicien informatique, réparation PC et réseaux.',whatsapp:'+21658999009',rating:4.6,jobs:41,reviews:16},
+      {name:'Anis Chaouachi',email:'a.chaouachi@test.tn',phone:'+21622000010',city:'Tunis',category:'Jardinage',bio:'Jardinier paysagiste, entretien espaces verts.',whatsapp:'+21622000010',rating:4.7,jobs:36,reviews:14},
+    ];
+
+    for(const a of artisans) {
+      const [ex] = await conn.query('SELECT id FROM users WHERE email=?',[a.email]);
+      if(ex.length) continue;
+      const [r] = await conn.query(
+        'INSERT INTO users (type,name,email,phone,password_hash,city,bio) VALUES (?,?,?,?,?,?,?)',
+        ['artisan',a.name,a.email,a.phone,hash,a.city,a.bio]
+      );
+      await conn.query(
+        'INSERT INTO artisan_profiles (user_id,category,whatsapp,is_validated,rating,reviews_count,jobs_count,response_rate) VALUES (?,?,?,1,?,?,?,?)',
+        [r.insertId,a.category,a.whatsapp,a.rating,a.reviews,a.jobs,95]
+      );
+    }
+
+    // 20 Clients test
+    const clients = [
+      {name:'Ines Chaouachi',email:'ines.c@test.tn',phone:'+21698100001',city:'Tunis',region:'Menzah'},
+      {name:'Leila Ayari',email:'leila.a@test.tn',phone:'+21655100002',city:'Ariana',region:'Ettadhamen'},
+      {name:'Mounir Saidi',email:'mounir.s@test.tn',phone:'+21622100003',city:'Sfax',region:'Sfax Ville'},
+      {name:'Rim Belhadj',email:'rim.b@test.tn',phone:'+21699100004',city:'Sousse',region:'Khezama'},
+      {name:'Walid Mejri',email:'walid.m@test.tn',phone:'+21620100005',city:'Tunis',region:'La Marsa'},
+      {name:'Sonia Ferchichi',email:'sonia.f@test.tn',phone:'+21625100006',city:'Bizerte',region:'Bizerte Ville'},
+      {name:'Hamza Riahi',email:'hamza.r@test.tn',phone:'+21654100007',city:'Nabeul',region:'Hammamet'},
+      {name:'Mariem Tlili',email:'mariem.t@test.tn',phone:'+21621100008',city:'Monastir',region:'Skanes'},
+      {name:'Fares Hammami',email:'fares.h@test.tn',phone:'+21658100009',city:'Tunis',region:'Bardo'},
+      {name:'Amira Karray',email:'amira.k@test.tn',phone:'+21622100010',city:'Kairouan',region:'Kairouan Nord'},
+      {name:'Zied Benhassen',email:'zied.b@test.tn',phone:'+21655200011',city:'Tunis',region:'Carthage'},
+      {name:'Nadia Oueslati',email:'nadia.o@test.tn',phone:'+21698200012',city:'Ben Arous',region:'Rades'},
+      {name:'Tarek Jemli',email:'tarek.j@test.tn',phone:'+21620200013',city:'Manouba',region:'Tebourba'},
+      {name:'Sara Nasri',email:'sara.n@test.tn',phone:'+21625200014',city:'Tunis',region:'El Aouina'},
+      {name:'Mehdi Abbes',email:'mehdi.a@test.tn',phone:'+21699200015',city:'Sfax',region:'Sakiet Eddaier'},
+      {name:'Cyrine Miled',email:'cyrine.m@test.tn',phone:'+21654200016',city:'Sousse',region:'Sahloul'},
+      {name:'Bilel Ghariani',email:'bilel.g@test.tn',phone:'+21621200017',city:'Ariana',region:'Raoued'},
+      {name:'Houda Selmi',email:'houda.s@test.tn',phone:'+21658200018',city:'Tunis',region:'Mutuelleville'},
+      {name:'Skander Farhat',email:'skander.f@test.tn',phone:'+21622200019',city:'Gabes',region:'Gabes Ville'},
+      {name:'Yasmine Chouika',email:'yasmine.ch@test.tn',phone:'+21655200020',city:'Tunis',region:'Les Berges du Lac'},
+    ];
+
+    for(const c of clients) {
+      const [ex] = await conn.query('SELECT id FROM users WHERE email=?',[c.email]);
+      if(ex.length) continue;
+      await conn.query(
+        'INSERT INTO users (type,name,email,phone,password_hash,city,region) VALUES (?,?,?,?,?,?,?)',
+        ['client',c.name,c.email,c.phone,hash,c.city,c.region]
+      );
+    }
+
+    await conn.commit();
+    res.json({message:'✅ 10 artisans + 20 clients de test créés. Mot de passe: fixily123'});
+  } catch(e){
+    await conn.rollback();
+    console.error(e);
+    res.status(500).json({error:'Erreur: '+e.message});
+  } finally{conn.release();}
+});
