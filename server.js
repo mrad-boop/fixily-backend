@@ -351,8 +351,12 @@ adsRouter.get('/active', async (req,res) => {
   if(position==='artisans') posClause="position IN ('both','artisans')";
   const [rows]=await pool.query(`SELECT * FROM ads WHERE status='active' AND ${posClause} AND starts_at<=NOW() AND (ends_at IS NULL OR ends_at>NOW()) AND impressions_count<impressions_max ORDER BY RAND() LIMIT 1`);
   if(!rows.length) return res.json({empty:true,message:'Votre pub ici'});
-  await pool.query('UPDATE ads SET impressions_count=impressions_count+1 WHERE id=?',[rows[0].id]);
-  if(rows[0].impressions_count+1>=rows[0].impressions_max) await pool.query("UPDATE ads SET status='expired' WHERE id=?",[rows[0].id]);
+  // Incrémenter seulement si header "x-count-impression: true" (envoyé par frontend si 1ère vue du jour)
+  const shouldCount = req.headers['x-count-impression'] === 'true';
+  if(shouldCount){
+    await pool.query('UPDATE ads SET impressions_count=impressions_count+1 WHERE id=?',[rows[0].id]);
+    if(rows[0].impressions_count+1>=rows[0].impressions_max) await pool.query("UPDATE ads SET status='expired' WHERE id=?",[rows[0].id]);
+  }
   res.json({empty:false,ad:rows[0]});
 });
 
@@ -412,7 +416,10 @@ adminRouter.get('/dashboard', async (req,res) => {
   const [[c]]=await pool.query("SELECT COUNT(*) n FROM users WHERE type='client' AND is_active=1");
   const [[a]]=await pool.query('SELECT COUNT(*) n FROM artisan_profiles');
   const [[pr]]=await pool.query("SELECT COUNT(*) n FROM artisan_profiles WHERE plan='premium'");
-  const [[mrr]]=await pool.query("SELECT COALESCE(SUM(amount_dt),0) n FROM subscriptions WHERE status='active' AND YEAR(started_at)=YEAR(NOW()) AND MONTH(started_at)=MONTH(NOW())");
+  const [[priceCfg]]=await pool.query("SELECT config_value FROM site_config WHERE config_key='premium_price_dt'");
+  const premiumPrice = parseFloat(priceCfg?.config_value||19);
+  const [[premiumCount]]=await pool.query("SELECT COUNT(*) n FROM artisan_profiles WHERE plan='premium'");
+  const mrr = { n: premiumCount.n * premiumPrice };
   const [[rp]]=await pool.query("SELECT COUNT(*) n FROM reports WHERE status='pending'");
   const [[sr]]=await pool.query("SELECT COUNT(*) n FROM service_requests WHERE status='pending'");
   const [[pw]]=await pool.query("SELECT COUNT(*) n FROM portfolio_works WHERE status='pending'");
@@ -504,6 +511,16 @@ adminRouter.get('/subscriptions', async (req,res) => {
   const [rows]=await pool.query('SELECT s.*,u.name artisan_name,u.email FROM subscriptions s JOIN artisan_profiles ap ON ap.id=s.artisan_id JOIN users u ON u.id=ap.user_id ORDER BY s.created_at DESC');
   res.json(rows);
 });
+adminRouter.delete('/users/:id', async (req,res) => {
+  try {
+    const [[u]]=await pool.query('SELECT type FROM users WHERE id=?',[req.params.id]);
+    if(!u) return res.status(404).json({error:'Utilisateur introuvable.'});
+    if(u.type==='admin') return res.status(403).json({error:'Impossible de supprimer un admin.'});
+    await pool.query('DELETE FROM users WHERE id=?',[req.params.id]);
+    res.json({message:'Utilisateur supprimé.'});
+  } catch(e){ res.status(500).json({error:'Erreur serveur.'}); }
+});
+
 adminRouter.post('/recalc-badges', async (req,res) => {
   await pool.query('UPDATE artisan_profiles SET badge_recommended=(rating>=4.5 AND jobs_count>=20 AND response_rate>=90)');
   res.json({message:'Badges recalculés.'});
