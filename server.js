@@ -49,7 +49,7 @@ app.use(morgan('combined'));
 app.use(express.json({ limit:'10mb' }));
 app.use(express.urlencoded({ extended:true }));
 app.use(cors({
-  origin: true,
+  origin: [process.env.FRONTEND_URL || 'https://fixily.tn', 'http://localhost:3000'],
   credentials: true,
 }));
 app.use('/api/', rateLimit({ windowMs:15*60*1000, max:300, message:{error:'Trop de requêtes.'} }));
@@ -532,22 +532,6 @@ app.get('/health', (req,res) => res.json({status:'ok',ts:new Date().toISOString(
 // ================================================================
 // DÉMARRAGE
 // ================================================================
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`🚀 Fixily.tn API — port ${PORT}`);
-  console.log(`   DB: ${process.env.DB_NAME}@${process.env.DB_HOST}`);
-});
-
-// Handler global — évite le crash sur erreur non catchée
-process.on('uncaughtException', (err) => {
-  console.error('❌ Uncaught Exception:', err.message);
-  // Ne pas crasher le processus
-});
-
-process.on('unhandledRejection', (reason) => {
-  console.error('❌ Unhandled Rejection:', reason?.message || reason);
-  // Ne pas crasher le processus
-});
 
 // ================================================================
 // NOUVELLES ROUTES V3
@@ -690,4 +674,20 @@ app.post('/api/admin/seed-test-data', authMw, adminOnly, async (req,res) => {
     console.error(e);
     res.status(500).json({error:'Erreur: '+e.message});
   } finally{conn.release();}
+});
+
+
+// ── Démarrage ──
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`🚀 Fixily.tn API — port ${PORT}`);
+  console.log(`   DB: ${process.env.DB_NAME}@${process.env.DB_HOST}`);
+});
+
+// Handler global — évite le crash sur erreur non catchée
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err.message);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('❌ Unhandled Rejection:', reason?.message || reason);
 });
