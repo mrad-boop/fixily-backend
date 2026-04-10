@@ -521,6 +521,25 @@ adminRouter.delete('/users/:id', async (req,res) => {
   } catch(e){ res.status(500).json({error:'Erreur serveur.'}); }
 });
 
+// Stats consultations artisans (triées par views_count)
+adminRouter.get('/stats/views', async (req,res) => {
+  try {
+    const [rows] = await pool.query(`
+      SELECT
+        u.id, u.name, u.city, u.created_at,
+        ap.category, ap.plan, ap.rating, ap.reviews_count,
+        ap.jobs_count, ap.views_count, ap.is_validated,
+        ROUND(ap.views_count / GREATEST(DATEDIFF(NOW(), u.created_at), 1), 2) as views_per_day
+      FROM users u
+      JOIN artisan_profiles ap ON ap.user_id = u.id
+      WHERE u.is_active = 1
+      ORDER BY ap.views_count DESC
+    `);
+    const total = rows.reduce((s,r)=>s+(r.views_count||0),0);
+    res.json({ artisans: rows, total_views: total });
+  } catch(e) { res.status(500).json({error:'Erreur serveur.'}); }
+});
+
 adminRouter.post('/recalc-badges', async (req,res) => {
   await pool.query('UPDATE artisan_profiles SET badge_recommended=(rating>=4.5 AND jobs_count>=20 AND response_rate>=90)');
   res.json({message:'Badges recalculés.'});
